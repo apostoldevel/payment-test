@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Optional
 
-from app.models import Card, Error, Outcome, PaymentMethod, Request, Response, Role
+from app.models import TEST_TOKENS, Card, Error, Outcome, PaymentMethod, Request, Response, Role
 
 # provider status -> role
 ROLE_OF = {
@@ -90,7 +90,7 @@ class Provider:
         """The test token behind a payment method, or None when there is none."""
         if not payment_method:
             return None
-        if payment_method in ("test_ok", "test_decline", "test_unknown", "test_drop"):
+        if payment_method in TEST_TOKENS:
             return payment_method
         m = self.methods.get(payment_method)
         return m.token if m else None
@@ -166,7 +166,7 @@ class Provider:
 
     def bind(self, req: Request) -> Result:
         token = self._scenario(req.payment_method)
-        if token is None or req.payment_method not in ("test_ok", "test_decline", "test_unknown", "test_drop"):
+        if token is None or req.payment_method not in TEST_TOKENS:
             return Result(_declined("invalid_payment_method", "bind takes a test token"))
         if token == "test_decline":
             return Result(_declined("card_declined", "the card was declined"))
@@ -174,7 +174,8 @@ class Provider:
         self.methods[m.id] = m
         pm = PaymentMethod(id=m.id, card=m.card)
         if token == "test_unknown":
-            return Result(Response(outcome=Outcome.unknown, raw={}))
+            # The method was saved; the answer is uncertain but still names it.
+            return Result(Response(outcome=Outcome.unknown, payment_method=pm, raw={"id": m.id}))
         r = Response(outcome=Outcome.success, payment_method=pm, raw={"id": m.id, "token": token})
         return Result(r, drop=token == "test_drop")
 

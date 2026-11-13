@@ -1,7 +1,8 @@
 """The request and response envelopes of the payment-service contract."""
 from __future__ import annotations
 
-from decimal import Decimal, InvalidOperation
+import re
+from decimal import Decimal
 from enum import Enum
 from typing import Any, Optional
 
@@ -39,6 +40,10 @@ class Role(str, Enum):
 
 TEST_TOKENS = ("test_ok", "test_decline", "test_unknown", "test_drop")
 
+# A positive amount with at most two decimals, digits only (no exponent, no separators).
+AMOUNT = re.compile(r"[0-9]{1,12}(\.[0-9]{1,2})?")
+MAX_DELAY_MS = 600_000
+
 
 class Request(BaseModel):
     """One envelope for every operation. Which fields an operation reads:
@@ -54,7 +59,9 @@ class Request(BaseModel):
     test_unknown, test_drop) or the id of a saved method from bind, which
     behaves as the token it was bound with. `metadata.notify_delay_ms` delays
     the notification of this operation (default 1000; 0 sends at once).
-    `credentials` and `return_url` are accepted and ignored.
+    `credentials` and `return_url` are accepted and ignored. `amount` is a
+    decimal with at most two places ("100.00"; a JSON number is accepted).
+    A malformed envelope is answered 422 — a caller's bug, not a refusal.
     """
 
     model_config = ConfigDict(extra="ignore")
@@ -65,7 +72,7 @@ class Request(BaseModel):
     provider_id: Optional[str] = None
     amount: Optional[Decimal] = None
     currency: Optional[str] = None
-    capture: bool = False
+    capture: Optional[bool] = False
     payment_method: Optional[str] = None
     credentials: Optional[Any] = None
     return_url: Optional[str] = None
@@ -76,22 +83,27 @@ class Request(BaseModel):
     def _amount(cls, v: Any) -> Any:
         if v is None:
             return v
-        if isinstance(v, bool):
+        if isinstance(v, bool) or not isinstance(v, (str, int, float)):
             raise ValueError("amount must be a decimal string")
-        try:
-            d = Decimal(str(v))
-        except InvalidOperation as e:
-            raise ValueError("amount must be a decimal string") from e
-        if not d.is_finite() or d <= 0:
+        text = str(v)
+        if not AMOUNT.fullmatch(text):
+            raise ValueError("amount must look like 100 or 100.00")
+        d = Decimal(text)
+        if d <= 0:
             raise ValueError("amount must be positive")
         return d
 
+    @field_validator("metadata")
+    @classmethod
+    def _metadata(cls, v: Any) -> Any:
+        delay = (v or {}).get("notify_delay_ms")
+        if delay is not None and (isinstance(delay, bool) or not isinstance(delay, int)
+                                  or not 0 <= delay <= MAX_DELAY_MS):
+            raise ValueError(f"metadata.notify_delay_ms must be an integer from 0 to {MAX_DELAY_MS}")
+        return v
+
     def notify_delay_ms(self) -> int:
-        raw = (self.metadata or {}).get("notify_delay_ms", 1000)
-        try:
-            return max(0, int(raw))
-        except (TypeError, ValueError):
-            return 1000
+        return (self.metadata or {}).get("notify_delay_ms", 1000)
 
 
 class Error(BaseModel):

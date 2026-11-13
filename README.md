@@ -40,11 +40,15 @@ keeps nothing on disk: a restart forgets every payment.
 | `bind` | `payment_method` (a test token) | — (`payment_method: {id, card}`) |
 | `unbind` | `payment_method` (the id from `bind`) | — |
 
-The answer is always HTTP 200:
+The answer to a well-formed request is always HTTP 200:
 `{outcome: success|declined|unknown, role, provider_id, provider_status, error: {code, message}, payment_method, raw}`.
-Any other status, or a dropped connection, means the service itself is unavailable.
+A dropped connection, or a status other than 200, 401 and 422, means the service itself is unavailable.
+422 means a malformed envelope (the caller's bug): `amount` not like `100` / `100.00`, `payment_method`
+not a string, `metadata.notify_delay_ms` not an integer 0–600000, a missing `idempotency_key`.
+A business refusal is never 422: it is 200 with `outcome: declined` and `error.code`.
 
-- `amount` is a decimal string (`"100.00"`); a number is accepted too.
+- `amount` is a decimal with at most two places (`"100.00"`); a JSON number is accepted too.
+- `capture: null` is `false`.
 - A payment is found by `provider_id`; `payment` is not compared on later operations.
 - An unknown `provider_id`: `declined`, `role: null`, `error.code: payment_not_found`.
 - A refund above what was paid: `declined`, `error.code: amount_exceeds`, the role unchanged.
@@ -63,8 +67,13 @@ behaves as the token it was bound with. An object is refused with 422.
 | `test_unknown` | `unknown`, `role: pending`, with `provider_id`; the operation did happen: `status` returns `hold` or `paid` |
 | `test_drop` | the operation happens as with `test_ok`, then the connection is closed without a response |
 
-**Idempotency.** A repeat with the same `idempotency_key` gets the first answer, whatever its body —
-also after `test_drop`, where the repeat gets the recorded success.
+The tokens drive `pay` and `bind` (and a payment with a saved method). `capture`, `cancel`, `refund`
+and `unbind` always answer on the payment's books; their declined cases are a wrong state, an unknown
+id or an amount above what is allowed. `bind` with `test_unknown` saves the method and still names it.
+
+**Idempotency.** A repeat of the same operation with the same `idempotency_key` gets the first answer,
+whatever its body — also after `test_drop`, where the repeat gets the recorded success. The same key on
+another operation is a new call. `status` is a read and is never replayed.
 
 **Key.** A missing or wrong `X-Service-Key` on `/v1/*` and `/test/*` is refused with 401
 `{"error": {"code": "unauthorized"}}`, before the body is read. `/health`, `/docs` and `/openapi.json`
@@ -75,7 +84,7 @@ need no key.
 After every operation that changes a payment, the service posts
 `{event_id, provider_id, payment, role, provider_status, raw}` with `X-Service-Key` to
 `NOTIFY_URL/payment/notify/testpay`, once, after `metadata.notify_delay_ms` (default 1000; `0` sends
-at once).
+at once; at most 600000). A notification still waiting when the service stops is dropped.
 
 `POST /test/renotify/{provider_id}` sends the last event of that payment again, with the same
 `event_id`: the case of a notification delivered twice. An unknown `provider_id` gets 404.

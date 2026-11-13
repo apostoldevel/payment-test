@@ -51,12 +51,14 @@ class Notifier:
                 r = await c.post(self.url, json=n.model_dump(mode="json"), headers={"X-Service-Key": self.key})
             log.info("notify %s %s role=%s -> %s", n.event_id, n.provider_id, n.role.value, r.status_code)
             return r.status_code
-        except httpx.HTTPError as e:
+        except Exception as e:  # noqa: BLE001 — a notification failure is logged, never raised
             log.warning("notify %s %s role=%s failed: %s", n.event_id, n.provider_id, n.role.value,
                         type(e).__name__)
             return None
 
-    async def drain(self) -> None:
-        """Wait for the scheduled notifications (tests, shutdown)."""
-        while self._tasks:
-            await asyncio.gather(*list(self._tasks), return_exceptions=True)
+    async def cancel_pending(self) -> None:
+        """On shutdown: a delayed notification not yet sent is dropped, as a
+        provider's sandbox would drop it; shutdown never waits for it."""
+        for t in list(self._tasks):
+            t.cancel()
+        await asyncio.gather(*list(self._tasks), return_exceptions=True)

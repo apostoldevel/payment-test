@@ -7,9 +7,11 @@ FROM ${REGISTRY}/python:3.11-slim
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt && useradd --system --no-create-home app
 
 COPY app/ app/
+
+USER app
 
 EXPOSE 8000
 

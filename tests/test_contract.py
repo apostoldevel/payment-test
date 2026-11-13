@@ -24,8 +24,10 @@ class TestKey:
         assert r.status_code == 401 and r.json()["error"]["code"] == "unauthorized"
 
     def test_wrong_key_is_401_before_the_body_is_read(self, client):
-        r = client.post("/v1/pay", content=b"not json", headers={"X-Service-Key": "wrong"})
-        assert r.status_code == 401
+        for key in ("wrong", None):
+            h = {"Content-Type": "application/json", **({"X-Service-Key": key} if key else {})}
+            r = client.post("/v1/pay", content=b"{not json", headers=h)
+            assert r.status_code == 401, r.text
 
     def test_a_refused_call_records_nothing(self, client):
         ik = f"k-{uuid.uuid4()}"
@@ -112,7 +114,7 @@ class TestMoney:
         b = ok(call(client, op, {"provider_id": "tp_none", "amount": "1"}), outcome="declined")
         assert b["role"] is None and b["error"]["code"] == "payment_not_found"
 
-    @pytest.mark.parametrize("amount", ("0", "-1", "abc", True))
+    @pytest.mark.parametrize("amount", ("0", "-1", "abc", True, "1e3", "1_000", "100.001", " 5"))
     def test_bad_amount_is_422(self, client, amount):
         assert pay(client, amount=amount).status_code == 422
 
@@ -131,7 +133,34 @@ class TestIdempotency:
         ok(call(client, "refund", {"provider_id": pid, "amount": "60.00"}), role="refunded")
 
 
+class TestIdempotencyScope:
+    def test_the_same_key_on_another_operation_is_a_new_call(self, client):
+        ik = f"k-{uuid.uuid4()}"
+        pid = ok(pay(client, idempotency_key=ik), role="hold")["provider_id"]
+        ok(call(client, "capture", {"provider_id": pid, "idempotency_key": ik}), role="paid")
+
+    def test_status_is_never_replayed(self, client):
+        pid = ok(pay(client))["provider_id"]
+        body = {"provider_id": pid, "idempotency_key": "poll"}
+        ok(call(client, "status", body), role="hold")
+        ok(call(client, "capture", {"provider_id": pid}), role="paid")
+        ok(call(client, "status", body), role="paid")
+
+    @pytest.mark.parametrize("delay", (-1, 600_001, 1.5, "10", True))
+    def test_bad_notify_delay_is_422_and_records_nothing(self, client, delay):
+        ik = f"k-{uuid.uuid4()}"
+        assert pay(client, idempotency_key=ik, metadata={"notify_delay_ms": delay}).status_code == 422
+        ok(pay(client, idempotency_key=ik), role="hold")
+
+    def test_capture_null_is_false(self, client):
+        ok(pay(client, capture=None), role="hold")
+
+
 class TestCards:
+    def test_bind_unknown_still_names_the_method(self, client):
+        b = ok(call(client, "bind", {"payment_method": "test_unknown"}), outcome="unknown")
+        ok(call(client, "unbind", {"payment_method": b["payment_method"]["id"]}))
+
     def test_bind_pay_unbind(self, client):
         b = ok(call(client, "bind", {"payment_method": "test_ok"}))
         pm = b["payment_method"]["id"]

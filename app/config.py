@@ -30,9 +30,15 @@ def load() -> Settings:
     key = os.environ.get("SERVICE_KEY", "")
     if not key.strip():
         raise ConfigError("SERVICE_KEY is not set: the service does not start without it")
+    if key != key.strip() or not key.isascii() or not key.isprintable():
+        raise ConfigError("SERVICE_KEY must be printable ASCII without surrounding whitespace")
+    try:
+        timeout = float(os.environ.get("NOTIFY_TIMEOUT_S", "5"))
+    except ValueError as e:
+        raise ConfigError("NOTIFY_TIMEOUT_S must be a number of seconds") from e
     return Settings(
         service_key=key,
         notify_url=os.environ.get("NOTIFY_URL", "http://backend:4977").rstrip("/"),
-        notify_timeout_s=float(os.environ.get("NOTIFY_TIMEOUT_S", "5")),
+        notify_timeout_s=timeout,
         log_level=os.environ.get("LOG_LEVEL", "INFO"),
     )

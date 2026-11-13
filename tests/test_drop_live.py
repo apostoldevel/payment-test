@@ -20,7 +20,9 @@ def server():
     srv = uvicorn.Server(uvicorn.Config(main.app, host="127.0.0.1", port=port, log_level="warning"))
     t = threading.Thread(target=srv.run, daemon=True)
     t.start()
+    t0 = time.monotonic()
     while not srv.started:
+        assert time.monotonic() - t0 < 10, "server did not start"
         time.sleep(0.02)
     yield f"http://127.0.0.1:{port}"
     srv.should_exit = True
@@ -38,3 +40,6 @@ def test_drop_is_a_closed_connection(server):
         assert time.monotonic() - t0 < 4
         r = c.post(f"{server}/v1/pay", json=body, headers=h)
     assert r.status_code == 200 and r.json()["outcome"] == "success"
+    with httpx.Client(timeout=5) as c:
+        s = c.post(f"{server}/v1/status", json={"idempotency_key": "s", "provider_id": r.json()["provider_id"]}, headers=h)
+    assert s.json()["role"] == "hold", "the dropped operation did happen"

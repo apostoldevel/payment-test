@@ -96,7 +96,7 @@
         "type": "object"
       },
       "Request": {
-        "description": "One envelope for every operation. Which fields an operation reads:\n\n- pay: payment, idempotency_key, amount, currency, payment_method; capture (default false)\n- capture: provider_id; amount (default: the held amount)\n- cancel, status: provider_id\n- refund: provider_id, amount\n- bind: payment_method (a test token)\n- unbind: payment_method (the id returned by bind)\n\n`payment_method` is a plain string: a test token (test_ok, test_decline,\ntest_unknown, test_drop) or the id of a saved method from bind, which\nbehaves as the token it was bound with. `metadata.notify_delay_ms` delays\nthe notification of this operation (default 1000; 0 sends at once).\n`credentials` and `return_url` are accepted and ignored.",
+        "description": "One envelope for every operation. Which fields an operation reads:\n\n- pay: payment, idempotency_key, amount, currency, payment_method; capture (default false)\n- capture: provider_id; amount (default: the held amount)\n- cancel, status: provider_id\n- refund: provider_id, amount\n- bind: payment_method (a test token)\n- unbind: payment_method (the id returned by bind)\n\n`payment_method` is a plain string: a test token (test_ok, test_decline,\ntest_unknown, test_drop) or the id of a saved method from bind, which\nbehaves as the token it was bound with. `metadata.notify_delay_ms` delays\nthe notification of this operation (default 1000; 0 sends at once).\n`credentials` and `return_url` are accepted and ignored. `amount` is a\ndecimal with at most two places (\"100.00\"; a JSON number is accepted).\nA malformed envelope is answered 422 — a caller's bug, not a refusal.",
         "properties": {
           "amount": {
             "anyOf": [
@@ -113,9 +113,16 @@
             "title": "Amount"
           },
           "capture": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "default": false,
-            "title": "Capture",
-            "type": "boolean"
+            "title": "Capture"
           },
           "credentials": {
             "anyOf": [
